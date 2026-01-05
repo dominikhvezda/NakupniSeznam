@@ -177,6 +177,25 @@ struct ShoppingListDetailView: View {
         .listStyle(.plain)
         .navigationTitle(shoppingList.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                ShareLink(item: formattedListText()) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
+    }
+
+    /// Vytvoří formátovaný text pro sdílení
+    private func formattedListText() -> String {
+        var text = "Nákupní seznam - \(shoppingList.name)\n\n"
+
+        let sortedItems = shoppingList.items.sorted(by: { $0.sortOrder < $1.sortOrder })
+        for item in sortedItems {
+            text += "• \(item.name)\n"
+        }
+
+        return text
     }
 }
 
