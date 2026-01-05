@@ -211,9 +211,12 @@ struct ContentView: View {
     private var voiceInputView: some View {
         VStack(spacing: 20) {
             Button(action: {
+                print("🔵 Microphone button tapped! isRecording: \(speechRecognizer.isRecording)")
                 if speechRecognizer.isRecording {
+                    print("🔵 Stopping recording...")
                     speechRecognizer.stopRecording()
                 } else {
+                    print("🔵 Starting recording...")
                     speechRecognizer.startRecording()
                     parsedItems = []
                     showingSaveButton = false

@@ -16,11 +16,17 @@ class SpeechRecognizer: ObservableObject {
 
     init() {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "cs-CZ"))
-        // Nebudeme volat requestAuthorization() v init - vyvoláme ho až při prvním použití
         authorizationStatus = SFSpeechRecognizer.authorizationStatus()
+        print("🎤 SpeechRecognizer initialized, status: \(authorizationStatus.rawValue)")
+    }
+
+    deinit {
+        print("🎤 SpeechRecognizer deallocating")
+        cleanupSync()
     }
 
     func requestAuthorization() async {
+        print("🎤 Requesting authorization...")
         let currentStatus = SFSpeechRecognizer.authorizationStatus()
 
         await MainActor.run {
@@ -30,6 +36,7 @@ class SpeechRecognizer: ObservableObject {
         if currentStatus == .notDetermined {
             let newStatus = await withCheckedContinuation { continuation in
                 SFSpeechRecognizer.requestAuthorization { status in
+                    print("🎤 Authorization result: \(status.rawValue)")
                     continuation.resume(returning: status)
                 }
             }
@@ -41,105 +48,160 @@ class SpeechRecognizer: ObservableObject {
     }
 
     func startRecording() {
+        print("🎤 startRecording called, current status: \(authorizationStatus.rawValue)")
+
         // Pokud ještě nemáme oprávnění, vyžádáme ho
         if authorizationStatus == .notDetermined {
+            print("🎤 Authorization not determined, requesting...")
             Task {
                 await requestAuthorization()
                 // Po získání oprávnění znovu zavoláme startRecording
                 if authorizationStatus == .authorized {
+                    print("🎤 Authorization granted, starting recording...")
                     startRecording()
+                } else {
+                    print("🎤 Authorization denied: \(authorizationStatus.rawValue)")
                 }
             }
             return
         }
 
         guard let recognizer = recognizer, recognizer.isAvailable else {
-            print("Speech recognizer není dostupný")
+            print("🎤 ERROR: Speech recognizer not available")
             return
         }
 
         guard authorizationStatus == .authorized else {
-            print("Není uděleno oprávnění pro rozpoznávání řeči")
+            print("🎤 ERROR: Not authorized for speech recognition: \(authorizationStatus.rawValue)")
             return
         }
 
         // Zastavíme předchozí nahrávání, pokud běží
         if isRecording {
+            print("🎤 Already recording, stopping first...")
             stopRecording()
         }
 
         do {
+            print("🎤 Setting up audio session...")
             // Nastavení audio session
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
+            print("🎤 Creating audio engine...")
             // Vytvoření nového audio enginu
             audioEngine = AVAudioEngine()
-            guard let audioEngine = audioEngine else { return }
+            guard let audioEngine = audioEngine else {
+                print("🎤 ERROR: Failed to create audio engine")
+                return
+            }
 
+            print("🎤 Creating recognition request...")
             // Vytvoření recognition requestu
             request = SFSpeechAudioBufferRecognitionRequest()
-            guard let request = request else { return }
+            guard let request = request else {
+                print("🎤 ERROR: Failed to create recognition request")
+                return
+            }
             request.shouldReportPartialResults = true
 
-            // Nastavení češtiny
-            if let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "cs-CZ")) {
-                task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-                    guard let self = self else { return }
+            print("🎤 Starting recognition task...")
+            // FIXED: Use existing recognizer instead of creating new one (memory leak!)
+            task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard let self = self else { return }
 
-                    if let result = result {
-                        let transcriptText = result.bestTranscription.formattedString
-                        Task { @MainActor in
-                            self.transcript = transcriptText
-                        }
+                if let result = result {
+                    let transcriptText = result.bestTranscription.formattedString
+                    Task { @MainActor in
+                        self.transcript = transcriptText
+                        print("🎤 Transcript: \(transcriptText)")
                     }
+                }
 
-                    if error != nil || result?.isFinal == true {
-                        Task {
-                            self.stopRecording()
-                        }
+                if let error = error {
+                    print("🎤 Recognition error: \(error.localizedDescription)")
+                    Task { @MainActor in
+                        self.stopRecording()
+                    }
+                }
+
+                if result?.isFinal == true {
+                    print("🎤 Recognition final")
+                    Task { @MainActor in
+                        self.stopRecording()
                     }
                 }
             }
 
+            print("🎤 Installing audio tap...")
             // Začneme nahrávat z mikrofonu
             let recordingFormat = audioEngine.inputNode.outputFormat(forBus: 0)
-            audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-                request.append(buffer)
+            audioEngine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
+                request?.append(buffer)
             }
 
+            print("🎤 Starting audio engine...")
             audioEngine.prepare()
             try audioEngine.start()
 
             DispatchQueue.main.async {
                 self.transcript = ""
                 self.isRecording = true
+                print("🎤 Recording started successfully!")
             }
 
         } catch {
-            print("Chyba při spuštění nahrávání: \(error.localizedDescription)")
+            print("🎤 ERROR: Failed to start recording: \(error.localizedDescription)")
+            cleanupSync()
         }
     }
 
     func stopRecording() {
-        audioEngine?.stop()
-        audioEngine?.inputNode.removeTap(onBus: 0)
+        print("🎤 stopRecording called")
+        cleanupSync()
+        DispatchQueue.main.async {
+            self.isRecording = false
+        }
+    }
+
+    private func cleanupSync() {
+        print("🎤 Cleaning up resources...")
+
+        // Stop and cleanup audio engine
+        if let audioEngine = audioEngine {
+            if audioEngine.isRunning {
+                audioEngine.stop()
+            }
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+
+        // End audio request
         request?.endAudio()
+
+        // Cancel recognition task
         task?.cancel()
 
+        // Release resources
         audioEngine = nil
         request = nil
         task = nil
 
-        DispatchQueue.main.async {
-            self.isRecording = false
+        // Deactivate audio session
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            print("🎤 Audio session deactivated")
+        } catch {
+            print("🎤 Warning: Failed to deactivate audio session: \(error.localizedDescription)")
         }
+
+        print("🎤 Cleanup complete")
     }
 
     func reset() {
         DispatchQueue.main.async {
             self.transcript = ""
         }
+        print("🎤 Transcript reset")
     }
 }
