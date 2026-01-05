@@ -9,6 +9,12 @@ Minimalistická iOS aplikace pro vytváření nákupních seznamů pomocí **hla
 - ⌨️ **Ruční psaní** - Napsání seznamu do textového pole
 - 📋 **Vložení ze schránky** - Automatické načtení textu ze schránky
 
+### AI Zpracování (Volitelné):
+- 🤖 **Inteligentní parsing** - Claude AI rozpozná položky z přirozeného jazyka bez potřeby čárek
+- ⚙️ **Nastavitelné** - Můžete zapnout/vypnout AI zpracování v nastavení
+- 🔑 **API klíč** - Zadejte svůj Anthropic API klíč v nastavení
+- ↩️ **Fallback** - Při chybě AI automaticky použije ruční parsing
+
 ### Další funkce:
 - 🔄 Automatické rozpoznávání české řeči
 - 🗂️ Inteligentní kategorizace surovin (pečivo, maso, mléčné výrobky, zelenina, ovoce, kosmetika, ostatní)
@@ -25,6 +31,7 @@ Minimalistická iOS aplikace pro vytváření nákupních seznamů pomocí **hla
 - **Speech Framework** - Rozpoznávání české řeči
 - **SwiftData** - Persistentní ukládání dat
 - **AVFoundation** - Práce s audio
+- **Anthropic Claude API** - AI-powered text processing (volitelné)
 
 ## 📋 Požadavky
 
@@ -59,6 +66,16 @@ Minimalistická iOS aplikace pro vytváření nákupních seznamů pomocí **hla
 
 ## 📱 Jak používat
 
+### Nastavení AI zpracování (volitelné):
+
+1. **Otevřete nastavení**: Klikněte na ikonu ozubeného kola (⚙️) v levém horním rohu
+2. **Zapněte AI zpracování**: Přepněte přepínač "Použít AI zpracování"
+3. **Zadejte API klíč**:
+   - Získejte klíč na [console.anthropic.com](https://console.anthropic.com/)
+   - Vložte klíč do pole a klikněte "Uložit"
+   - Klíč se automaticky ověří
+4. **Hotovo**: S AI můžete psát seznamy v přirozeném jazyce (např. "potřebuji mléko máslo a chleba")
+
 ### Vytvoření nového seznamu:
 
 1. **Vyberte režim** v horní části obrazovky:
@@ -68,7 +85,7 @@ Minimalistická iOS aplikace pro vytváření nákupních seznamů pomocí **hla
 
 2. **Zadejte seznam:**
    - **Hlasový režim**: Klikněte na modrý mikrofon, nadiktujte seznam, klikněte na červené tlačítko
-   - **Textový režim**: Napište seznam (položky oddělte čárkou nebo novým řádkem)
+   - **Textový režim**: Napište seznam (s AI můžete použít přirozený jazyk, bez AI oddělte položky čárkou)
    - **Režim schránky**: Zkopírujte seznam do schránky a přepněte na tento režim
 
 3. **Vytvořte seznam**: Klikněte "Vytvořit seznam" → aplikace zobrazí seřazené položky
@@ -79,9 +96,15 @@ Minimalistická iOS aplikace pro vytváření nákupních seznamů pomocí **hla
 
 ## 💡 Příklad použití
 
-Zadejte (hlasem, textem nebo ze schránky):
+**Bez AI (oddělení čárkami):**
 ```
 Chleba, rohlíky, mléko, jogurt, kuřecí maso, mrkev, rajčata, jablka, banány
+```
+
+**S AI (přirozený jazyk):**
+```
+Potřebuji koupit chleba a rohlíky, pak mléko s jogurtem, také kuřecí maso.
+Nesmím zapomenout na zeleninu - mrkev a rajčata, a ovoce jako jablka a banány.
 ```
 
 Aplikace automaticky seřadí:
@@ -103,10 +126,13 @@ NakupniSeznam/
 │   └── ShoppingList.swift          # SwiftData modely
 ├── Managers/
 │   ├── SpeechRecognizer.swift      # Rozpoznávání řeči
-│   └── CategoryManager.swift       # Kategorizace surovin
+│   ├── CategoryManager.swift       # Kategorizace surovin
+│   ├── AnthropicAPIManager.swift   # Komunikace s Claude API
+│   └── SettingsManager.swift       # Správa nastavení a API klíče
 ├── Views/
 │   ├── ContentView.swift           # Hlavní obrazovka
-│   └── HistoryView.swift           # Historie seznamů
+│   ├── HistoryView.swift           # Historie seznamů
+│   └── SettingsView.swift          # Nastavení aplikace
 └── NakupniSeznamApp.swift          # Entry point
 ```
 
@@ -119,6 +145,9 @@ Minimalistický design s důrazem na jednoduchost a rychlost použití:
 - Ikona schránky s informacemi o stavu
 - Přehledné odrážky pro položky
 - Zelené tlačítko pro uložení
+- Ikona ozubeného kola pro nastavení
+- Loading overlay při zpracování AI
+- Maskované zobrazení API klíče pro bezpečnost
 
 ## 🐛 Řešení problémů
 
@@ -138,6 +167,10 @@ Minimalistický design s důrazem na jednoduchost a rychlost použití:
 - Pro nejlepší výsledky mluvte zřetelně a v klidném prostředí
 - Seznam se automaticky uloží s názvem ve formátu "4. 1. 2026"
 - Speech Recognition vyžaduje online připojení
+- **AI zpracování je volitelné** - aplikace funguje i bez API klíče
+- Při chybě AI se automaticky použije fallback na ruční parsing
+- Anthropic nabízí free tier s omezeným počtem requestů
+- API klíč je uložen bezpečně v UserDefaults
 
 ## 👨‍💻 Autor
 

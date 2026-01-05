@@ -12,11 +12,16 @@ enum InputMode: String, CaseIterable {
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var speechRecognizer = SpeechRecognizer()
+    @StateObject private var settings = SettingsManager.shared
 
     // Stavy pro UI
     @State private var showingHistory = false
+    @State private var showingSettings = false
     @State private var parsedItems: [ShoppingItem] = []
     @State private var showingSaveButton = false
+    @State private var isProcessing = false
+    @State private var errorMessage: String?
+    @State private var showingErrorAlert = false
 
     // Nové stavy pro různé módy zadávání
     @State private var selectedMode: InputMode = .voice
@@ -132,6 +137,12 @@ struct ContentView: View {
             }
             .navigationTitle("Nákupní Seznam")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { showingSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .font(.title3)
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showingHistory = true }) {
                         Image(systemName: "clock.arrow.circlepath")
@@ -141,6 +152,37 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
+            }
+            .alert("Chyba při zpracování", isPresented: $showingErrorAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                if let errorMessage = errorMessage {
+                    Text(errorMessage)
+                }
+            }
+            .overlay {
+                if isProcessing {
+                    ZStack {
+                        Color.black.opacity(0.3)
+                            .ignoresSafeArea()
+
+                        VStack(spacing: 20) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+
+                            Text(settings.useAI && settings.hasAPIKey ? "AI zpracovává seznam..." : "Zpracovávám seznam...")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        .padding(30)
+                        .background(Color.gray.opacity(0.9))
+                        .cornerRadius(15)
+                    }
+                }
             }
         }
     }
@@ -335,11 +377,39 @@ struct ContentView: View {
         let textToProcess = getCurrentText()
         guard !textToProcess.isEmpty else { return }
 
-        // Použijeme stejnou logiku pro kategorizaci jako dříve
-        parsedItems = CategoryManager.shared.parseAndCategorizeItems(from: textToProcess)
+        isProcessing = true
+        errorMessage = nil
 
-        if !parsedItems.isEmpty {
-            showingSaveButton = true
+        Task {
+            do {
+                // Pokusíme se použít AI zpracování
+                let items = try await CategoryManager.shared.parseAndCategorizeItems(from: textToProcess)
+
+                await MainActor.run {
+                    parsedItems = items
+                    isProcessing = false
+
+                    if !parsedItems.isEmpty {
+                        showingSaveButton = true
+                    }
+                }
+            } catch {
+                // Při chybě AI použijeme fallback na ruční parsing
+                await MainActor.run {
+                    parsedItems = CategoryManager.shared.parseAndCategorizeItemsManually(from: textToProcess)
+                    isProcessing = false
+
+                    // Zobrazíme chybovou hlášku pouze pokud šlo o AI chybu
+                    if settings.useAI && settings.hasAPIKey {
+                        errorMessage = error.localizedDescription
+                        showingErrorAlert = true
+                    }
+
+                    if !parsedItems.isEmpty {
+                        showingSaveButton = true
+                    }
+                }
+            }
         }
     }
 
