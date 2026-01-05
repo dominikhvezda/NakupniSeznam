@@ -28,6 +28,9 @@ struct ContentView: View {
     @State private var manualText: String = ""
     @State private var clipboardText: String = ""
 
+    // Focus state pro keyboard dismissal
+    @FocusState private var isTextEditorFocused: Bool
+
     // Sdílený DateFormatter pro efektivitu
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -37,19 +40,20 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                // Picker pro výběr módu zadávání
-                Picker("Režim zadávání", selection: $selectedMode) {
-                    ForEach(InputMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Picker pro výběr módu zadávání
+                    Picker("Režim zadávání", selection: $selectedMode) {
+                        ForEach(InputMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 10)
-                .onChange(of: selectedMode) { _, newMode in
-                    handleModeChange(newMode)
-                }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 10)
+                    .onChange(of: selectedMode) { _, newMode in
+                        handleModeChange(newMode)
+                    }
 
                 // Podmíněné zobrazení podle vybraného módu
                 switch selectedMode {
@@ -134,8 +138,22 @@ struct ContentView: View {
                     }
                     .padding(.horizontal)
                 }
+                }
+            }
+            .contentMargins(.bottom, 100, for: .scrollContent)
+            .scrollDismissesKeyboard(.interactively)
+            .onTapGesture {
+                isTextEditorFocused = false
             }
             .navigationTitle("Nákupní Seznam")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Hotovo") {
+                        isTextEditorFocused = false
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: { showingSettings = true }) {
@@ -254,11 +272,13 @@ struct ContentView: View {
                         .frame(height: 200)
                         .scrollContentBackground(.hidden)
                         .background(Color.clear)
+                        .focused($isTextEditorFocused)
                 } else {
                     TextEditor(text: $manualText)
                         .padding(8)
                         .frame(height: 200)
                         .background(Color.clear)
+                        .focused($isTextEditorFocused)
                 }
 
                 // Placeholder
@@ -317,11 +337,13 @@ struct ContentView: View {
                             .frame(height: 200)
                             .scrollContentBackground(.hidden)
                             .background(Color.clear)
+                            .focused($isTextEditorFocused)
                     } else {
                         TextEditor(text: $clipboardText)
                             .padding(8)
                             .frame(height: 200)
                             .background(Color.clear)
+                            .focused($isTextEditorFocused)
                     }
                 }
                 .padding(.horizontal)
@@ -350,6 +372,9 @@ struct ContentView: View {
         if speechRecognizer.isRecording {
             speechRecognizer.stopRecording()
         }
+
+        // Skryjeme klávesnici
+        isTextEditorFocused = false
 
         // Resetujeme stav
         parsedItems = []
