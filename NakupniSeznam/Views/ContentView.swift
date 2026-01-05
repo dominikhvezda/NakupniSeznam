@@ -11,7 +11,7 @@ enum InputMode: String, CaseIterable {
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var speechRecognizer = SpeechRecognizer()
+    @StateObject private var voiceRecorder = SimpleVoiceRecorder()
     @StateObject private var settings = SettingsManager.shared
 
     // Stavy pro UI
@@ -210,40 +210,54 @@ struct ContentView: View {
     /// View pro hlasové zadávání
     private var voiceInputView: some View {
         VStack(spacing: 20) {
+            // ALWAYS TAPPABLE BUTTON - No .disabled modifier!
             Button(action: {
-                print("🔵 Microphone button tapped! isRecording: \(speechRecognizer.isRecording)")
-                if speechRecognizer.isRecording {
+                print("🔵🔵🔵 BUTTON TAPPED! 🔵🔵🔵")
+                print("🔵 isRecording: \(voiceRecorder.isRecording)")
+
+                if voiceRecorder.isRecording {
                     print("🔵 Stopping recording...")
-                    speechRecognizer.stopRecording()
+                    voiceRecorder.stopRecording()
                 } else {
-                    print("🔵 Starting recording...")
-                    speechRecognizer.startRecording()
+                    print("🔵 Starting recording with permission check...")
+                    voiceRecorder.requestPermissionsAndStartRecording()
                     parsedItems = []
                     showingSaveButton = false
                 }
             }) {
                 ZStack {
                     Circle()
-                        .fill(speechRecognizer.isRecording ? Color.red : Color.blue)
+                        .fill(voiceRecorder.isRecording ? Color.red : Color.blue)
                         .frame(width: 100, height: 100)
                         .shadow(radius: 10)
 
-                    Image(systemName: speechRecognizer.isRecording ? "stop.fill" : "mic.fill")
+                    Image(systemName: voiceRecorder.isRecording ? "stop.fill" : "mic.fill")
                         .font(.system(size: 40))
                         .foregroundColor(.white)
                 }
             }
-            .disabled(speechRecognizer.authorizationStatus != .authorized)
+            .buttonStyle(.plain) // Ensure button is tappable
 
-            Text(speechRecognizer.isRecording ? "Nahrávám..." : "Stiskněte pro nahrání")
+            Text(voiceRecorder.isRecording ? "Nahrávám..." : "Klepněte pro nahrání")
                 .font(.headline)
                 .foregroundColor(.secondary)
 
-            if speechRecognizer.authorizationStatus != .authorized {
-                Text("Povolte přístup k mikrofonu a rozpoznávání řeči v Nastavení")
+            // Show error if any
+            if let errorMessage = voiceRecorder.errorMessage {
+                Text(errorMessage)
                     .font(.caption)
                     .foregroundColor(.red)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+
+            // Show transcript if recording
+            if !voiceRecorder.transcript.isEmpty {
+                Text(voiceRecorder.transcript)
+                    .font(.body)
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
                     .padding(.horizontal)
             }
         }
@@ -361,7 +375,7 @@ struct ContentView: View {
     private func getCurrentText() -> String {
         switch selectedMode {
         case .voice:
-            return speechRecognizer.transcript
+            return voiceRecorder.transcript
         case .text:
             return manualText
         case .clipboard:
@@ -372,8 +386,9 @@ struct ContentView: View {
     /// Zpracuje změnu módu zadávání
     private func handleModeChange(_ newMode: InputMode) {
         // Zastavíme nahrávání, pokud běží
-        if speechRecognizer.isRecording {
-            speechRecognizer.stopRecording()
+        if voiceRecorder.isRecording {
+            print("🔵 Stopping recording due to mode change...")
+            voiceRecorder.stopRecording()
         }
 
         // Skryjeme klávesnici
@@ -476,7 +491,7 @@ struct ContentView: View {
 
         switch selectedMode {
         case .voice:
-            speechRecognizer.reset()
+            voiceRecorder.reset()
         case .text:
             manualText = ""
         case .clipboard:
