@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Speech
+import PhotosUI
 
 // Enum pro režimy zadávání seznamu
 enum InputMode: String, CaseIterable {
@@ -31,6 +32,14 @@ struct ContentView: View {
     // Focus state pro keyboard dismissal
     @FocusState private var isTextEditorFocused: Bool
 
+    // Stavy pro analýzu ledničky
+    @State private var showingImagePicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var fridgeImage: UIImage?
+    @State private var showingFridgeResults = false
+    @State private var fridgeAnalysisResult: FridgeAnalysisResult?
+    @State private var selectedSuggestions: Set<String> = []
+
     // Sdílený DateFormatter pro efektivitu
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -53,6 +62,27 @@ struct ContentView: View {
                     .padding(.top, 10)
                     .onChange(of: selectedMode) { _, newMode in
                         handleModeChange(newMode)
+                    }
+
+                    // Tlačítko pro analýzu ledničky
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        HStack {
+                            Image(systemName: "camera.fill")
+                                .font(.title3)
+                            Text("Vyfotit ledničku")
+                                .font(.headline)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.purple)
+                        .cornerRadius(10)
+                    }
+                    .padding(.horizontal)
+                    .onChange(of: selectedPhotoItem) { _, newItem in
+                        Task {
+                            await loadAndAnalyzeImage(from: newItem)
+                        }
                     }
 
                 // Podmíněné zobrazení podle vybraného módu
@@ -173,6 +203,20 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
+            }
+            .sheet(isPresented: $showingFridgeResults) {
+                FridgeAnalysisResultsView(
+                    result: fridgeAnalysisResult,
+                    selectedSuggestions: $selectedSuggestions,
+                    onAddItems: {
+                        addItemsFromFridgeAnalysis()
+                    },
+                    onDismiss: {
+                        showingFridgeResults = false
+                        fridgeAnalysisResult = nil
+                        selectedSuggestions.removeAll()
+                    }
+                )
             }
             .alert("Chyba při zpracování", isPresented: $showingErrorAlert) {
                 Button("OK", role: .cancel) { }
@@ -496,6 +540,196 @@ struct ContentView: View {
             manualText = ""
         case .clipboard:
             clipboardText = ""
+        }
+    }
+
+    /// Načte a analyzuje obrázek z photo pickeru
+    private func loadAndAnalyzeImage(from item: PhotosPickerItem?) async {
+        guard let item = item else { return }
+
+        await MainActor.run {
+            isProcessing = true
+            errorMessage = nil
+        }
+
+        do {
+            // Načtení obrázku
+            guard let imageData = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: imageData) else {
+                await MainActor.run {
+                    errorMessage = "Nepodařilo se načíst obrázek"
+                    showingErrorAlert = true
+                    isProcessing = false
+                }
+                return
+            }
+
+            // Analýza pomocí Claude API
+            let result = try await AnthropicAPIManager.shared.analyzeFridgeImage(
+                image,
+                apiKey: settings.apiKey
+            )
+
+            await MainActor.run {
+                fridgeAnalysisResult = result
+                selectedSuggestions.removeAll()
+                isProcessing = false
+                showingFridgeResults = true
+            }
+
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showingErrorAlert = true
+                isProcessing = false
+            }
+        }
+    }
+
+    /// Přidá vybrané položky z analýzy ledničky do seznamu
+    private func addItemsFromFridgeAnalysis() {
+        guard !selectedSuggestions.isEmpty else {
+            showingFridgeResults = false
+            return
+        }
+
+        // Přidáme vybrané návrhy do parsedItems
+        var startOrder = parsedItems.count
+        let newItems = selectedSuggestions.map { itemName in
+            let category = CategoryManager.shared.categorizeItem(itemName)
+            let item = ShoppingItem(name: itemName, category: category, sortOrder: startOrder)
+            startOrder += 1
+            return item
+        }
+
+        parsedItems.append(contentsOf: newItems)
+        showingSaveButton = true
+
+        // Zavřeme sheet
+        showingFridgeResults = false
+        fridgeAnalysisResult = nil
+        selectedSuggestions.removeAll()
+    }
+}
+
+/// View pro zobrazení výsledků analýzy ledničky
+struct FridgeAnalysisResultsView: View {
+    let result: FridgeAnalysisResult?
+    @Binding var selectedSuggestions: Set<String>
+    let onAddItems: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let result = result {
+                        // Položky nalezené v ledničce
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("✓ V ledničce máš:")
+                                .font(.headline)
+                                .foregroundColor(.green)
+
+                            if result.itemsFound.isEmpty {
+                                Text("Nebyly rozpoznány žádné položky")
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(result.itemsFound, id: \.self) { item in
+                                        HStack {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.green)
+                                            Text(item)
+                                                .font(.body)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.green.opacity(0.1))
+                        .cornerRadius(10)
+
+                        // Doporučené položky k nákupu
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("💡 Možná chybí:")
+                                .font(.headline)
+                                .foregroundColor(.orange)
+
+                            if result.suggestions.isEmpty {
+                                Text("Žádné návrhy")
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(result.suggestions, id: \.self) { item in
+                                        HStack {
+                                            Button(action: {
+                                                toggleSelection(item)
+                                            }) {
+                                                HStack {
+                                                    Image(systemName: selectedSuggestions.contains(item) ? "checkmark.square.fill" : "square")
+                                                        .foregroundColor(selectedSuggestions.contains(item) ? .blue : .gray)
+                                                        .font(.title3)
+
+                                                    Text(item)
+                                                        .font(.body)
+                                                        .foregroundColor(.primary)
+
+                                                    Spacer()
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(10)
+                    }
+
+                    Spacer()
+                }
+                .padding()
+            }
+            .navigationTitle("Analýza ledničky")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Zavřít") {
+                        onDismiss()
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !selectedSuggestions.isEmpty {
+                    Button(action: {
+                        onAddItems()
+                    }) {
+                        Text("Přidat vybrané (\(selectedSuggestions.count))")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(10)
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+
+    private func toggleSelection(_ item: String) {
+        if selectedSuggestions.contains(item) {
+            selectedSuggestions.remove(item)
+        } else {
+            selectedSuggestions.insert(item)
         }
     }
 }
